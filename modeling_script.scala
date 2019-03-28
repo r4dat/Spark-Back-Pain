@@ -14,7 +14,7 @@ var rx = spark.read.format("csv").option("header", "true").load("/user/mschlomka
 var scoringDat = spark.read.format("csv").option("header", "true").load("/user/mschlomka/backpain/scoringData.csv")
 
 
-// Proprietary Grouping (Primary Dx)
+// Proprietary UHG Grouping (Primary Dx)
 var etg_link = spark.read.format("csv").option("header","true").option("inferSchema","true").load("/user/rrutherford/zeppelin_out/etg_icdx.csv")
 
 // Joined etg_Dx to get some diagnosis dimension reduction. ~100K to ~450
@@ -82,14 +82,14 @@ train = train.withColumn("ETG_BASE_ARRAY",coalesce($"ETG_BASE_ARRAY",fill))
 train = train.join(mbr,Seq("patid"),"left")
 
 // Create full feature vector from Dx and Mbr
-var all_features = Array("age","ETG_BASE_ARRAY_vec") ++ train.columns.filter(_.contains("_vec")).toArray
+var all_features = Array("age","ETG_BASE_ARRAY_vec") ++ train.columns.filter(_.contains("_vec"))
 val vectorAssembler = new VectorAssembler().setInputCols(all_features).setOutputCol("features")
 val pipelineVectorAssembler = new Pipeline().setStages(Array(cv,vectorAssembler))
 train = pipelineVectorAssembler.fit(train).transform(train)
 
 val lr = new LogisticRegression()
-val rf = new RandomForestClassifier()
-val gbt = new GBTClassificatier()
+val rf = new RandomForestClassifier().cacheNodeIds(true)
+val gbt = new GBTClassifier().cacheNodeIds(true)
 
 val lrPipe = Array[PipelineStage](lr)
 val rfPipe = Array[PipelineStage](rf)
@@ -120,12 +120,15 @@ val gbtPipe_grid = {new ParamGridBuilder()
   
 val paramGrid = lrPipe_grid ++ rfPipe_grid ++ gbtPipe_grid
 
-//No parallel argument for CxV in spark 2.2
+// 4 got ~6.8% queue utilization
 val cxv = {new CrossValidator() 
   .setEstimator(pipeline)
   .setEvaluator(new BinaryClassificationEvaluator)
   .setEstimatorParamMaps(paramGrid)
-  .setNumFolds(3)}
+  .setNumFolds(3)
+  .setParallelism(10)}
+
+train.cache().show(5) // cache the training data.
 
 // Run cross-validation, assuming "training" data exists
 val cvModel = cxv.fit(train)
