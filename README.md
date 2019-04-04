@@ -1,2 +1,2 @@
 # Spark-Back-Pain
-Internal company context to model back surgery
+Internal company contest to model back surgery
